@@ -94,10 +94,18 @@ controller:
     #       memory: 32Mi
   # </Jenkins Configuration as Code (JCasC)>
 
+  # List of groovy init scripts to be executed during Jenkins controller start
+  initScripts: []
+  #  - |
+  #    print 'adding global pipeline libraries, register properties, bootstrap jobs...'
+
   # <Jenkins Global Security>
   # configAutoReload requires UseSecurity is set to true:
   useSecurity: true
   disableRememberMe: false
+  # Enable HTML parsing using OWASP Markup Formatter Plugin (antisamy-markup-formatter), useful with ghprb plugin.
+  # The plugin is not installed by default, please update controller.installPlugins.
+  enableRawHtmlMarkupFormatter: false
   # This is ignored if enableRawHtmlMarkupFormatter is true
   markupFormatter: plainText
   disabledAgentProtocols:
@@ -122,6 +130,11 @@ controller:
   jenkinsRef: "/usr/share/jenkins/ref"
   # </Jenkins Global Settings>
 
+  # Used to approve a list of groovy functions in pipelines used the script-security plugin. Can be viewed under /scriptApproval
+  scriptApproval: []
+  #  - "method groovy.json.JsonSlurperClassic parseText java.lang.String"
+  #  - "new groovy.json.JsonSlurperClassic"
+
   # <Jenkins Plugins>
   # List of plugins to be install during Jenkins controller start
   installPlugins:
@@ -143,6 +156,143 @@ controller:
   overwritePluginsFromImage: true
   # </Jenkins Plugins>
   
+  # <Jenkins Kubernetes Plugin>
+  agentListenerPort: 50000
+  agentListenerHostPort:
+  # Kubernetes service type for the JNLP agent service
+  # agentListenerServiceType is the Kubernetes Service type for the JNLP agent service,
+  # either 'LoadBalancer', 'NodePort', or 'ClusterIP'
+  # Note if you set this to 'LoadBalancer', you *must* define annotations to secure it. By default
+  # this will be an external load balancer and allowing inbound 0.0.0.0/0, a HUGE
+  # security risk:  https://github.com/kubernetes/charts/issues/1341
+  agentListenerServiceType: "ClusterIP"
+  # Optionally assign an IP to the LoadBalancer agentListenerService LoadBalancer
+  # GKE users: only regional static IPs will work for Service Load balancer.
+  agentListenerLoadBalancerIP:
+  agentListenerServiceAnnotations: {}
+  # Example of 'LoadBalancer' type of agent listener with annotations securing it
+  # agentListenerServiceType: LoadBalancer
+  # agentListenerServiceAnnotations:
+  #   service.beta.kubernetes.io/aws-load-balancer-internal: "True"
+  #   service.beta.kubernetes.io/load-balancer-source-ranges: "172.0.0.0/8, 10.0.0.0/8"
+  # </Jenkins Kubernetes Plugin>
+
+  # <Kubernetes StatefulSet & Service>
+  image: "jenkins/jenkins"
+  tag: "lts"
+  imagePullPolicy: "Always"
+  imagePullSecretName:
+  resources:
+    requests:
+      cpu: "50m"
+      memory: "256Mi"
+    limits:
+      cpu: "2000m"
+      memory: "4096Mi"
+  # Environment variables that get added to the init container (useful for e.g. http_proxy)
+  # initContainerEnv:
+  #   - name: http_proxy
+  #     value: "http://192.168.64.1:3128"
+  # containerEnv:
+  #   - name: http_proxy
+  #     value: "http://192.168.64.1:3128"
+  # Enable pod security context (must be `true` if runAsUser or fsGroup are set)
+  usePodSecurityContext: true
+  # Set runAsUser to 1000 to let Jenkins run as non-root user 'jenkins' which exists in 'jenkins/jenkins' docker image.
+  # When setting runAsUser to a different value than 0 also set fsGroup to the same value:
+  runAsUser: 1000
+  fsGroup: 1000
+  # controller.hostAliases allows for adding entries to Pod /etc/hosts:
+  # https://kubernetes.io/docs/concepts/services-networking/add-entries-to-pod-etc-hosts-with-host-aliases/
+  hostAliases: []
+  # - ip: 192.168.50.50
+  #   hostnames:
+  #     - something.local
+  # - ip: 10.0.50.50
+  #   hostnames:
+  #     - other.local
+  # If you have PodSecurityPolicies that require dropping of capabilities as suggested by CIS K8s benchmark, put them here
+  securityContextCapabilities: {}
+  #  drop:
+  #    - NET_RAW
+  servicePort: 8080
+  targetPort: 8080
+  # Optionally configure a JMX port
+  # jmxPort: 4000
+  # Optionally configure other ports to expose in the controller container
+  extraPorts: []
+  # - name: BuildInfoProxy
+  #   port: 9000
+  # LoadBalancerSourcesRange is a list of allowed CIDR values, which are combined with ServicePort to
+  # set allowed inbound rules on the security group assigned to the controller load balancer
+  loadBalancerSourceRanges:
+  - 0.0.0.0/0
+  # Optionally assign a known public LB IP
+  # loadBalancerIP: 1.2.3.4
+  # For minikube, set this to NodePort, elsewhere use LoadBalancer
+  # Use ClusterIP if your setup includes ingress controller
+  serviceType: ClusterIP
+  # Jenkins controller service annotations
+  serviceAnnotations: {}
+  # Jenkins controller custom labels
+  statefulSetLabels: {}
+  #   foo: bar
+  #   bar: foo
+  # Jenkins controller service labels
+  serviceLabels: {}
+  #   service.beta.kubernetes.io/aws-load-balancer-backend-protocol: https
+  # Put labels on Jenkins controller pod
+  podLabels: {}
+  # Used to create Ingress record (should used with ServiceType: ClusterIP)
+  # nodePort: <to set explicitly, choose port between 30000-32767
+  # Optionally configure lifetime for controller-container
+  lifecycle:
+  #  postStart:
+  #    exec:
+  #      command:
+  #      - "uname"
+  #      - "-a"
+  admin:
+    existingSecret: ""
+    userKey: jenkins-admin-user
+    passwordKey: jenkins-admin-password
+  # Optionally specify additional init-containers
+  customInitContainers: []
+  # - name: custom-init
+  #   image: "alpine:3.7"
+  #   imagePullPolicy: Always
+  #   command: [ "uname", "-a" ]
+  # Name of the Kubernetes scheduler to use
+  schedulerName: ""
+  # Node labels and tolerations for pod assignment
+  # ref: https://kubernetes.io/docs/concepts/configuration/assign-pod-node/#nodeselector
+  # ref: https://kubernetes.io/docs/concepts/configuration/assign-pod-node/#taints-and-tolerations-beta-feature
+  nodeSelector: {}
+  terminationGracePeriodSeconds:
+  tolerations: []
+  affinity: {}
+  # Leverage a priorityClass to ensure your pods survive resource shortages
+  # ref: https://kubernetes.io/docs/concepts/configuration/pod-priority-preemption/
+  priorityClassName:
+  podAnnotations: {}
+  # Add StatefulSet annotations
+  statefulSetAnnotations: {}
+  # </Kubernetes StatefulSet & Service>
+
+  # <Kubernetes Health Probes>
+  # Enable Kubernetes Liveness and Readiness Probes
+  # ~ 2 minutes to allow Jenkins to restart when upgrading plugins. Set ReadinessTimeout to be shorter than LivenessTimeout.
+  healthProbes: true
+  healthProbesLivenessTimeout: 5
+  healthProbesReadinessTimeout: 5
+  healthProbeLivenessPeriodSeconds: 10
+  healthProbeReadinessPeriodSeconds: 10
+  healthProbeLivenessFailureThreshold: 5
+  healthProbeReadinessFailureThreshold: 3
+  healthProbeLivenessInitialDelay: 90
+  healthProbeReadinessInitialDelay: 60
+  # </Kubernetes Health Probes>
+
   httpsKeyStore:
     jenkinsHttpsJksSecretName: ''
     enable: false
@@ -193,165 +343,30 @@ controller:
         6NnqtR4gEBF0ZVlQmkycFvD4EC2boP943dLqNUvop+4R3SM1QMM6P5u8iTXtHd/VN4MwMyy1wtog
         hYAzODo1Jt59pcqqKJEas0C/lFJEB3frw4ImNx5fNlJYOpx+ijfQs9m39CevDq0=
 
-  image: "jenkins/jenkins"
-  tag: "lts"
-  imagePullPolicy: "Always"
-  imagePullSecretName:
-  # Optionally configure lifetime for controller-container
-  lifecycle:
-  #  postStart:
-  #    exec:
-  #      command:
-  #      - "uname"
-  #      - "-a"
-
   hostNetworking: false
+
+  # <Kubernetes Secret>
   # When enabling LDAP or another non-Jenkins identity source, the built-in admin account will no longer exist.
   # If you disable the non-Jenkins identity store and instead use the Jenkins internal one,
   # you should revert controller.adminUser to your preferred admin user:
   adminUser: "admin"
   # adminPassword: <defaults to random>
-  admin:
-    existingSecret: ""
-    userKey: jenkins-admin-user
-    passwordKey: jenkins-admin-password
-  resources:
-    requests:
-      cpu: "50m"
-      memory: "256Mi"
-    limits:
-      cpu: "2000m"
-      memory: "4096Mi"
-  # Environment variables that get added to the init container (useful for e.g. http_proxy)
-  # initContainerEnv:
-  #   - name: http_proxy
-  #     value: "http://192.168.64.1:3128"
-  # containerEnv:
-  #   - name: http_proxy
-  #     value: "http://192.168.64.1:3128"
+  # </Kubernetes Secret>
+
   # Set min/max heap here if needed with:
   # javaOpts: "-Xms512m -Xmx512m"
   # jenkinsOpts: ""
   # jenkinsUrl: ""
   # If you set this prefix and use ingress controller then you might want to set the ingress path below
   # jenkinsUriPrefix: "/jenkins"
-  # Enable pod security context (must be `true` if runAsUser or fsGroup are set)
-  usePodSecurityContext: true
-  # Set runAsUser to 1000 to let Jenkins run as non-root user 'jenkins' which exists in 'jenkins/jenkins' docker image.
-  # When setting runAsUser to a different value than 0 also set fsGroup to the same value:
-  runAsUser: 1000
-  fsGroup: 1000
-  # If you have PodSecurityPolicies that require dropping of capabilities as suggested by CIS K8s benchmark, put them here
-  securityContextCapabilities: {}
-  #  drop:
-  #    - NET_RAW
-  servicePort: 8080
-  targetPort: 8080
-  # For minikube, set this to NodePort, elsewhere use LoadBalancer
-  # Use ClusterIP if your setup includes ingress controller
-  serviceType: ClusterIP
-  # Jenkins controller service annotations
-  serviceAnnotations: {}
-  # Jenkins controller custom labels
-  statefulSetLabels: {}
-  #   foo: bar
-  #   bar: foo
-  # Jenkins controller service labels
-  serviceLabels: {}
-  #   service.beta.kubernetes.io/aws-load-balancer-backend-protocol: https
-  # Put labels on Jenkins controller pod
-  podLabels: {}
-  # Used to create Ingress record (should used with ServiceType: ClusterIP)
-  # nodePort: <to set explicitly, choose port between 30000-32767
-  # Enable Kubernetes Liveness and Readiness Probes
-  # ~ 2 minutes to allow Jenkins to restart when upgrading plugins. Set ReadinessTimeout to be shorter than LivenessTimeout.
-  healthProbes: true
-  healthProbesLivenessTimeout: 5
-  healthProbesReadinessTimeout: 5
-  healthProbeLivenessPeriodSeconds: 10
-  healthProbeReadinessPeriodSeconds: 10
-  healthProbeLivenessFailureThreshold: 5
-  healthProbeReadinessFailureThreshold: 3
-  healthProbeLivenessInitialDelay: 90
-  healthProbeReadinessInitialDelay: 60
-  agentListenerPort: 50000
-  agentListenerHostPort:
 
-  # Kubernetes service type for the JNLP agent service
-  # agentListenerServiceType is the Kubernetes Service type for the JNLP agent service,
-  # either 'LoadBalancer', 'NodePort', or 'ClusterIP'
-  # Note if you set this to 'LoadBalancer', you *must* define annotations to secure it. By default
-  # this will be an external load balancer and allowing inbound 0.0.0.0/0, a HUGE
-  # security risk:  https://github.com/kubernetes/charts/issues/1341
-  agentListenerServiceType: "ClusterIP"
-  # Optionally assign an IP to the LoadBalancer agentListenerService LoadBalancer
-  # GKE users: only regional static IPs will work for Service Load balancer.
-  agentListenerLoadBalancerIP:
-  agentListenerServiceAnnotations: {}
-
-  # Example of 'LoadBalancer' type of agent listener with annotations securing it
-  # agentListenerServiceType: LoadBalancer
-  # agentListenerServiceAnnotations:
-  #   service.beta.kubernetes.io/aws-load-balancer-internal: "True"
-  #   service.beta.kubernetes.io/load-balancer-source-ranges: "172.0.0.0/8, 10.0.0.0/8"
-
-  # LoadBalancerSourcesRange is a list of allowed CIDR values, which are combined with ServicePort to
-  # set allowed inbound rules on the security group assigned to the controller load balancer
-  loadBalancerSourceRanges:
-  - 0.0.0.0/0
-  # Optionally assign a known public LB IP
-  # loadBalancerIP: 1.2.3.4
-  # Optionally configure a JMX port
   # requires additional javaOpts, ie
   # javaOpts: >
   #   -Dcom.sun.management.jmxremote.port=4000
   #   -Dcom.sun.management.jmxremote.authenticate=false
   #   -Dcom.sun.management.jmxremote.ssl=false
-  # jmxPort: 4000
-  # Optionally configure other ports to expose in the controller container
-  extraPorts: []
-  # - name: BuildInfoProxy
-  #   port: 9000
 
-  # Enable HTML parsing using OWASP Markup Formatter Plugin (antisamy-markup-formatter), useful with ghprb plugin.
-  # The plugin is not installed by default, please update controller.installPlugins.
-  enableRawHtmlMarkupFormatter: false
-  # Used to approve a list of groovy functions in pipelines used the script-security plugin. Can be viewed under /scriptApproval
-  scriptApproval: []
-  #  - "method groovy.json.JsonSlurperClassic parseText java.lang.String"
-  #  - "new groovy.json.JsonSlurperClassic"
-  # List of groovy init scripts to be executed during Jenkins controller start
-  initScripts: []
-  #  - |
-  #    print 'adding global pipeline libraries, register properties, bootstrap jobs...'
-
-  # Optionally specify additional init-containers
-  customInitContainers: []
-  # - name: custom-init
-  #   image: "alpine:3.7"
-  #   imagePullPolicy: Always
-  #   command: [ "uname", "-a" ]
-
-  # Name of the Kubernetes scheduler to use
-  schedulerName: ""
-  # Node labels and tolerations for pod assignment
-  # ref: https://kubernetes.io/docs/concepts/configuration/assign-pod-node/#nodeselector
-  # ref: https://kubernetes.io/docs/concepts/configuration/assign-pod-node/#taints-and-tolerations-beta-feature
-  nodeSelector: {}
-
-  terminationGracePeriodSeconds:
-
-  tolerations: []
-
-  affinity: {}
-  # Leverage a priorityClass to ensure your pods survive resource shortages
-  # ref: https://kubernetes.io/docs/concepts/configuration/pod-priority-preemption/
-  priorityClassName:
-
-  podAnnotations: {}
-  # Add StatefulSet annotations
-  statefulSetAnnotations: {}
-
+  # <Kubernetes Ingress>
   ingress:
     enabled: false
     # Override for the default paths that map requests to the backend
@@ -378,7 +393,6 @@ controller:
     # - secretName: jenkins.cluster.local
     #   hosts:
     #     - jenkins.cluster.local
-
   # often you want to have your controller all locked down and private
   # but you still want to get webhooks from your SCM
   # A secondary ingress will let you expose different urls
@@ -400,7 +414,9 @@ controller:
     # - secretName: jenkins-external.example.com
     #   hosts:
     #     - jenkins-external.example.com
+  # </Kubernetes Ingress>
 
+  # <GKE BackendConfig>
   # If you're running on GKE and need to configure a backendconfig
   # to finish ingress setup, use the following values.
   # Docs: https://cloud.google.com/kubernetes-engine/docs/concepts/backendconfig
@@ -411,23 +427,14 @@ controller:
     labels: {}
     annotations: {}
     spec: {}
+  # </GKE BackendConfig>
 
-  # Openshift route
+  # OpenShift route
   route:
     enabled: false
     labels: {}
     annotations: {}
     # path: "/jenkins"
-
-  # controller.hostAliases allows for adding entries to Pod /etc/hosts:
-  # https://kubernetes.io/docs/concepts/services-networking/add-entries-to-pod-etc-hosts-with-host-aliases/
-  hostAliases: []
-  # - ip: 192.168.50.50
-  #   hostnames:
-  #     - something.local
-  # - ip: 10.0.50.50
-  #   hostnames:
-  #     - other.local
 
   # Expose Prometheus metrics
   prometheus:
