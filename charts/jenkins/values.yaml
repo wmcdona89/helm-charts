@@ -12,10 +12,137 @@
 # For FQDN resolving of the controller service. Change this value to match your existing configuration.
 # ref: https://github.com/kubernetes/dns/blob/master/docs/specification.md
 clusterZone: "cluster.local"
-
+checkDeprecation: true
 renderHelmLabels: true
 
 controller:
+  # Used for label app.kubernetes.io/component
+  componentName: "jenkins-controller"
+  # Can be used to disable rendering controller test resources when using helm template
+  testEnabled: true
+
+  # <Jenkins Configuration as Code (JCasC)>
+  # Below is the implementation of Jenkins Configuration as Code.  Add a key under configScripts for each configuration area,
+  # where each corresponds to a plugin or section of the UI.  Each key (prior to | character) is just a label, and can be any value.
+  # Keys are only used to give the section a meaningful name.  The only restriction is they may only contain RFC 1123 \ DNS label
+  # characters: lowercase letters, numbers, and hyphens.  The keys become the name of a configuration yaml file on the controller in
+  # /var/jenkins_home/casc_configs (by default) and will be processed by the Configuration as Code Plugin.  The lines after each |
+  # become the content of the configuration yaml file.  The first line after this is a JCasC root element, eg jenkins, credentials,
+  # etc.  Best reference is https://<jenkins_url>/configuration-as-code/reference.  The example below creates a welcome message:
+  JCasC:
+    defaultConfig: true
+    configScripts: {}
+    #  welcome-message: |
+    #    jenkins:
+    #      systemMessage: Welcome to our CI\CD server.  This Jenkins is configured and managed 'as code'.
+    # Ignored if securityRealm is defined in controller.JCasC.configScripts and
+    # ignored if controller.enableXmlConfig=true as controller.securityRealm takes precedence
+    securityRealm: |-
+      legacy
+    # Ignored if authorizationStrategy is defined in controller.JCasC.configScripts
+    authorizationStrategy: |-
+      loggedInUsersCanDoAnything:
+        allowAnonymousRead: false
+  sidecars:
+    configAutoReload:
+      # If enabled: true, Jenkins Configuration as Code will be reloaded on-the-fly without a reboot.  If false or not-specified,
+      # jcasc changes will cause a reboot and will only be applied at the subsequent start-up.  Auto-reload uses the
+      # http://<jenkins_url>/reload-configuration-as-code endpoint to reapply config when changes to the configScripts are detected.
+      enabled: true
+      image: kiwigrid/k8s-sidecar:0.1.193
+      imagePullPolicy: IfNotPresent
+      resources: {}
+        #   limits:
+        #     cpu: 100m
+        #     memory: 100Mi
+        #   requests:
+        #     cpu: 50m
+        #     memory: 50Mi
+      # How many connection-related errors to retry on
+      reqRetryConnect: 10
+      # env:
+      #   - name: REQ_TIMEOUT
+      #     value: "30"
+      # SSH port value can be set to any unused TCP port.  The default, 1044, is a non-standard SSH port that has been chosen at random.
+      # Is only used to reload jcasc config from the sidecar container running in the Jenkins controller pod.
+      # This TCP port will not be open in the pod (unless you specifically configure this), so Jenkins will not be
+      # accessible via SSH from outside of the pod.  Note if you use non-root pod privileges (runAsUser & fsGroup),
+      # this must be > 1024:
+      sshTcpPort: 1044
+      # folder in the pod that should hold the collected dashboards:
+      folder: "/var/jenkins_home/casc_configs"
+      # If specified, the sidecar will search for JCasC config-maps inside this namespace.
+      # Otherwise the namespace in which the sidecar is running will be used.
+      # It's also possible to specify ALL to search in all namespaces:
+      # searchNamespace:
+    # Allows you to inject additional/other sidecars
+    other: []
+    ## The example below runs the client for https://smee.io as sidecar container next to Jenkins,
+    ## that allows to trigger build behind a secure firewall.
+    ## https://jenkins.io/blog/2019/01/07/webhook-firewalls/#triggering-builds-with-webhooks-behind-a-secure-firewall
+    ##
+    ## Note: To use it you should go to https://smee.io/new and update the url to the generete one.
+    # - name: smee
+    #   image: docker.io/twalter/smee-client:1.0.2
+    #   args: ["--port", "{{ .Values.controller.servicePort }}", "--path", "/github-webhook/", "--url", "https://smee.io/new"]
+    #   resources:
+    #     limits:
+    #       cpu: 50m
+    #       memory: 128Mi
+    #     requests:
+    #       cpu: 10m
+    #       memory: 32Mi
+  # </Jenkins Configuration as Code (JCasC)>
+
+  # <Jenkins Global Security>
+  # configAutoReload requires UseSecurity is set to true:
+  useSecurity: true
+  disableRememberMe: false
+  # This is ignored if enableRawHtmlMarkupFormatter is true
+  markupFormatter: plainText
+  disabledAgentProtocols:
+    - JNLP-connect
+    - JNLP2-connect  
+  csrf:
+    defaultCrumbIssuer:
+      enabled: true
+      proxyCompatability: true
+  # </Jenkins Global Security>
+
+  # <Jenkins Global Settings>
+  numExecutors: 0
+  # configures the executor mode of the Jenkins node. Possible values are: NORMAL or EXCLUSIVE
+  executorMode: "NORMAL"
+  customJenkinsLabels: []
+  # This values should not be changed unless you use your custom image of jenkins or any devired from. If you want to use
+  # Cloudbees Jenkins Distribution docker, you should set jenkinsHome: "/var/cloudbees-jenkins-distribution"
+  jenkinsHome: "/var/jenkins_home"
+  # This values should not be changed unless you use your custom image of jenkins or any devired from. If you want to use
+  # Cloudbees Jenkins Distribution docker, you should set jenkinsRef: "/usr/share/cloudbees-jenkins-distribution/ref"
+  jenkinsRef: "/usr/share/jenkins/ref"
+  # </Jenkins Global Settings>
+
+  # <Jenkins Plugins>
+  # List of plugins to be install during Jenkins controller start
+  installPlugins:
+    - kubernetes:1.25.7
+    - workflow-job:2.39
+    - workflow-aggregator:2.6
+    - credentials-binding:1.23
+    - git:4.2.2
+    - configuration-as-code:1.43
+  # List of plugins to install in addition to those listed in controller.installPlugins
+  additionalPlugins: []
+  # Enable to initialize the Jenkins controller only once on initial installation.
+  # Without this, whenever the controller gets restarted (Evicted, etc.) it will fetch plugin updates which has the potential to cause breakage.
+  # Note that for this to work, `persistence.enabled` needs to be set to `true`
+  initializeOnce: false
+  # Enable to always override the installed plugins with the values of 'controller.installPlugins' on upgrade or redeployment.
+  # overwritePlugins: true
+  # Configures if plugins bundled with `controller.image` should be overwritten with the values of 'controller.installPlugins' on upgrade or redeployment.
+  overwritePluginsFromImage: true
+  # </Jenkins Plugins>
+  
   httpsKeyStore:
     jenkinsHttpsJksSecretName: ''
     enable: false
@@ -65,8 +192,7 @@ controller:
         /MwpRxxazoda9r45kqQpyG+XoM4pB+Fd3JzMc4FUGxfVPxJU4jLawnJJiZ3vqiSyaB0YyUL+Er1Q
         6NnqtR4gEBF0ZVlQmkycFvD4EC2boP943dLqNUvop+4R3SM1QMM6P5u8iTXtHd/VN4MwMyy1wtog
         hYAzODo1Jt59pcqqKJEas0C/lFJEB3frw4ImNx5fNlJYOpx+ijfQs9m39CevDq0=
-  # Used for label app.kubernetes.io/component
-  componentName: "jenkins-controller"
+
   image: "jenkins/jenkins"
   tag: "lts"
   imagePullPolicy: "Always"
@@ -78,15 +204,6 @@ controller:
   #      command:
   #      - "uname"
   #      - "-a"
-  disableRememberMe: false
-  numExecutors: 0
-  # configures the executor mode of the Jenkins node. Possible values are: NORMAL or EXCLUSIVE
-  executorMode: "NORMAL"
-  # This is ignored if enableRawHtmlMarkupFormatter is true
-  markupFormatter: plainText
-  customJenkinsLabels: []
-  # configAutoReload requires UseSecurity is set to true:
-  useSecurity: true
 
   hostNetworking: false
   # When enabling LDAP or another non-Jenkins identity source, the built-in admin account will no longer exist.
@@ -98,12 +215,6 @@ controller:
     existingSecret: ""
     userKey: jenkins-admin-user
     passwordKey: jenkins-admin-password
-  # This values should not be changed unless you use your custom image of jenkins or any devired from. If you want to use
-  # Cloudbees Jenkins Distribution docker, you should set jenkinsHome: "/var/cloudbees-jenkins-distribution"
-  jenkinsHome: "/var/jenkins_home"
-  # This values should not be changed unless you use your custom image of jenkins or any devired from. If you want to use
-  # Cloudbees Jenkins Distribution docker, you should set jenkinsRef: "/usr/share/cloudbees-jenkins-distribution/ref"
-  jenkinsRef: "/usr/share/jenkins/ref"
   resources:
     requests:
       cpu: "50m"
@@ -165,13 +276,7 @@ controller:
   healthProbeReadinessInitialDelay: 60
   agentListenerPort: 50000
   agentListenerHostPort:
-  disabledAgentProtocols:
-    - JNLP-connect
-    - JNLP2-connect
-  csrf:
-    defaultCrumbIssuer:
-      enabled: true
-      proxyCompatability: true
+
   # Kubernetes service type for the JNLP agent service
   # agentListenerServiceType is the Kubernetes Service type for the JNLP agent service,
   # either 'LoadBalancer', 'NodePort', or 'ClusterIP'
@@ -208,29 +313,6 @@ controller:
   # - name: BuildInfoProxy
   #   port: 9000
 
-  # List of plugins to be install during Jenkins controller start
-  installPlugins:
-    - kubernetes:1.25.7
-    - workflow-job:2.39
-    - workflow-aggregator:2.6
-    - credentials-binding:1.23
-    - git:4.2.2
-    - configuration-as-code:1.43
-
-  # List of plugins to install in addition to those listed in controller.installPlugins
-  additionalPlugins: []
-
-  # Enable to initialize the Jenkins controller only once on initial installation.
-  # Without this, whenever the controller gets restarted (Evicted, etc.) it will fetch plugin updates which has the potential to cause breakage.
-  # Note that for this to work, `persistence.enabled` needs to be set to `true`
-  initializeOnce: false
-
-  # Enable to always override the installed plugins with the values of 'controller.installPlugins' on upgrade or redeployment.
-  # overwritePlugins: true
-
-  # Configures if plugins bundled with `controller.image` should be overwritten with the values of 'controller.installPlugins' on upgrade or redeployment.
-  overwritePluginsFromImage: true
-
   # Enable HTML parsing using OWASP Markup Formatter Plugin (antisamy-markup-formatter), useful with ghprb plugin.
   # The plugin is not installed by default, please update controller.installPlugins.
   enableRawHtmlMarkupFormatter: false
@@ -243,27 +325,6 @@ controller:
   #  - |
   #    print 'adding global pipeline libraries, register properties, bootstrap jobs...'
 
-  # Below is the implementation of Jenkins Configuration as Code.  Add a key under configScripts for each configuration area,
-  # where each corresponds to a plugin or section of the UI.  Each key (prior to | character) is just a label, and can be any value.
-  # Keys are only used to give the section a meaningful name.  The only restriction is they may only contain RFC 1123 \ DNS label
-  # characters: lowercase letters, numbers, and hyphens.  The keys become the name of a configuration yaml file on the controller in
-  # /var/jenkins_home/casc_configs (by default) and will be processed by the Configuration as Code Plugin.  The lines after each |
-  # become the content of the configuration yaml file.  The first line after this is a JCasC root element, eg jenkins, credentials,
-  # etc.  Best reference is https://<jenkins_url>/configuration-as-code/reference.  The example below creates a welcome message:
-  JCasC:
-    defaultConfig: true
-    configScripts: {}
-    #  welcome-message: |
-    #    jenkins:
-    #      systemMessage: Welcome to our CI\CD server.  This Jenkins is configured and managed 'as code'.
-    # Ignored if securityRealm is defined in controller.JCasC.configScripts and
-    # ignored if controller.enableXmlConfig=true as controller.securityRealm takes precedence
-    securityRealm: |-
-      legacy
-    # Ignored if authorizationStrategy is defined in controller.JCasC.configScripts
-    authorizationStrategy: |-
-      loggedInUsersCanDoAnything:
-        allowAnonymousRead: false
   # Optionally specify additional init-containers
   customInitContainers: []
   # - name: custom-init
@@ -271,56 +332,6 @@ controller:
   #   imagePullPolicy: Always
   #   command: [ "uname", "-a" ]
 
-  sidecars:
-    configAutoReload:
-      # If enabled: true, Jenkins Configuration as Code will be reloaded on-the-fly without a reboot.  If false or not-specified,
-      # jcasc changes will cause a reboot and will only be applied at the subsequent start-up.  Auto-reload uses the
-      # http://<jenkins_url>/reload-configuration-as-code endpoint to reapply config when changes to the configScripts are detected.
-      enabled: true
-      image: kiwigrid/k8s-sidecar:0.1.193
-      imagePullPolicy: IfNotPresent
-      resources: {}
-        #   limits:
-        #     cpu: 100m
-        #     memory: 100Mi
-        #   requests:
-        #     cpu: 50m
-        #     memory: 50Mi
-      # How many connection-related errors to retry on
-      reqRetryConnect: 10
-      # env:
-      #   - name: REQ_TIMEOUT
-      #     value: "30"
-      # SSH port value can be set to any unused TCP port.  The default, 1044, is a non-standard SSH port that has been chosen at random.
-      # Is only used to reload jcasc config from the sidecar container running in the Jenkins controller pod.
-      # This TCP port will not be open in the pod (unless you specifically configure this), so Jenkins will not be
-      # accessible via SSH from outside of the pod.  Note if you use non-root pod privileges (runAsUser & fsGroup),
-      # this must be > 1024:
-      sshTcpPort: 1044
-      # folder in the pod that should hold the collected dashboards:
-      folder: "/var/jenkins_home/casc_configs"
-      # If specified, the sidecar will search for JCasC config-maps inside this namespace.
-      # Otherwise the namespace in which the sidecar is running will be used.
-      # It's also possible to specify ALL to search in all namespaces:
-      # searchNamespace:
-
-    # Allows you to inject additional/other sidecars
-    other: []
-    ## The example below runs the client for https://smee.io as sidecar container next to Jenkins,
-    ## that allows to trigger build behind a secure firewall.
-    ## https://jenkins.io/blog/2019/01/07/webhook-firewalls/#triggering-builds-with-webhooks-behind-a-secure-firewall
-    ##
-    ## Note: To use it you should go to https://smee.io/new and update the url to the generete one.
-    # - name: smee
-    #   image: docker.io/twalter/smee-client:1.0.2
-    #   args: ["--port", "{{ .Values.controller.servicePort }}", "--path", "/github-webhook/", "--url", "https://smee.io/new"]
-    #   resources:
-    #     limits:
-    #       cpu: 50m
-    #       memory: 128Mi
-    #     requests:
-    #       cpu: 10m
-    #       memory: 32Mi
   # Name of the Kubernetes scheduler to use
   schedulerName: ""
   # Node labels and tolerations for pod assignment
@@ -438,9 +449,6 @@ controller:
     alertingrules: []
     # Set a custom namespace where to deploy PrometheusRule resource
     prometheusRuleNamespace: ""
-
-  # Can be used to disable rendering controller test resources when using helm template
-  testEnabled: true
 
 agent:
   enabled: true
@@ -709,4 +717,3 @@ backup:
   securityContextCapabilities: {}
   #  drop:
   #    - NET_RAW
-checkDeprecation: true
